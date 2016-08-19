@@ -11,7 +11,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.CharsetEncoder;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,9 +23,10 @@ import static org.jsoup.nodes.Entities.EscapeMode.extended;
  * named character references</a>.
  */
 public class Entities {
-    private static Pattern entityPattern = Pattern.compile("^(\\w+)=(\\d+)(?:,(\\d+))?;(\\d+)$");
+    private static Pattern entityPattern = Pattern.compile("^(\\w+)=(\\w+)(?:,(\\w+))?;(\\w+)$");
     static final int empty = -1;
     static final String emptyName = "";
+    static final int codepointRadix = 36;
 
     public enum EscapeMode {
         /** Restricted entities suitable for XHTML output: lt, gt, amp, and quot only. */
@@ -36,64 +36,40 @@ public class Entities {
         /** Complete HTML entities. */
         extended("entities-full.properties", 2125);
 
+        // table of named references to their codepoints. sorted so we can binary search. built by BuildEntities.
         private String[] nameKeys;
-        private int[] codeVals;
+        private int[] codeVals; // limitation is the few references with multiple characters; those go into multipoints.
 
-        private int[] codeKeys;
+        // table of codepoints to named entities.
+        private int[] codeKeys; // we don' support multicodepoints to single named value currently
         private String[] nameVals;
 
         EscapeMode(String file, int size) {
-            nameKeys = new String[size];
-            codeVals = new int[size];
-            codeKeys = new int[size];
-            nameVals = new String[size];
-
-            InputStream stream = Entities.class.getResourceAsStream(file);
-            if (stream == null)
-                throw new IllegalStateException("Could not read resource " + file + "; did you ProGuard to hard?");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
-            String entry;
-            int i = 0;
-            try {
-                while ((entry = reader.readLine()) != null) {
-                    // NotNestedLessLess=10913,824;1887
-                    final Matcher match = entityPattern.matcher(entry);
-                    if (match.find()) {
-                        final String name = match.group(1);
-                        final int cp1 = Integer.parseInt(match.group(2));
-                        final int cp2 = match.group(3) != null ? Integer.parseInt(match.group(3)) : empty;
-                        final int index = Integer.parseInt(match.group(4));
-
-                        nameKeys[i] = name;
-                        codeVals[i] = cp1;
-                        codeKeys[index] = cp1;
-                        nameVals[index] = name;
-
-                        if (cp2 != empty) {
-                            multipoints.put(name, new String(new int[]{cp1, cp2}, 0, 2));
-                        }
-                        i++;
-                    }
-
-                }
-                reader.close();
-            } catch (IOException e) {
-                throw new IllegalStateException("Error reading resource " + file);
-            }
+            load(this, file, size);
         }
 
         int codepointForName(final String name) {
             int index = Arrays.binarySearch(nameKeys, name);
-            return index > 0 ? codeVals[index] : empty;
+            return index >= 0 ? codeVals[index] : empty;
         }
 
         String nameForCodepoint(final int codepoint) {
-            int index = Arrays.binarySearch(codeKeys, codepoint);
-            return index > 0 ? nameVals[index] : emptyName;
+            final int index = Arrays.binarySearch(codeKeys, codepoint);
+            if (index >= 0) {
+                // the results are ordered so lower case versions of same codepoint come after uppercase, and we prefer to emit lower
+                // (and binary search for same item with multi results is undefined
+                return (index < nameVals.length-1 && codeKeys[index+1] == codepoint) ?
+                    nameVals[index+1] : nameVals[index];
+            }
+            return emptyName;
+        }
+
+        private int size() {
+            return nameKeys.length;
         }
     }
 
-    private static final Map<String, String> multipoints = new HashMap<String, String>(); // name -> multiple character references
+    private static final HashMap<String, String> multipoints = new HashMap<String, String>(); // name -> multiple character references
 
     private Entities() {
     }
@@ -142,7 +118,7 @@ public class Entities {
         return emptyName;
     }
 
-    public static int codepointsByName(final String name, final int[] codepoints) {
+    public static int codepointsForName(final String name, final int[] codepoints) {
         String val = multipoints.get(name);
         if (val != null) {
             codepoints[0] = val.codePointAt(0);
@@ -230,22 +206,25 @@ public class Entities {
                     default:
                         if (canEncode(coreCharset, c, encoder))
                             accum.append(c);
-                        else {
-                            final String name = escapeMode.nameForCodepoint(c);
-                            if (name != emptyName) // ok for identity check
-                                accum.append('&').append(name).append(';');
-                            else
-                                accum.append("&#x").append(Integer.toHexString(codePoint)).append(';');
-                        }
+                        else
+                            appendEncoded(accum, escapeMode, codePoint);
                 }
             } else {
                 final String c = new String(Character.toChars(codePoint));
                 if (encoder.canEncode(c)) // uses fallback encoder for simplicity
                     accum.append(c);
                 else
-                    accum.append("&#x").append(Integer.toHexString(codePoint)).append(';');
+                    appendEncoded(accum, escapeMode, codePoint);
             }
         }
+    }
+
+    private static void appendEncoded(Appendable accum, EscapeMode escapeMode, int codePoint) throws IOException {
+        final String name = escapeMode.nameForCodepoint(codePoint);
+        if (name != emptyName) // ok for identity check
+            accum.append('&').append(name).append(';');
+        else
+            accum.append("&#x").append(Integer.toHexString(codePoint)).append(';');
     }
 
     static String unescape(String string) {
@@ -296,6 +275,46 @@ public class Entities {
             if (name.startsWith("UTF-")) // covers UTF-8, UTF-16, et al
                 return utf;
             return fallback;
+        }
+    }
+
+    private static void load(EscapeMode e, String file, int size) {
+        e.nameKeys = new String[size];
+        e.codeVals = new int[size];
+        e.codeKeys = new int[size];
+        e.nameVals = new String[size];
+
+        InputStream stream = Entities.class.getResourceAsStream(file);
+        if (stream == null)
+            throw new IllegalStateException("Could not read resource " + file + ". Make sure you copy resources for " + Entities.class.getCanonicalName());
+        BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
+        String entry;
+        int i = 0;
+        try {
+            while ((entry = reader.readLine()) != null) {
+                // NotNestedLessLess=10913,824;1887
+                final Matcher match = entityPattern.matcher(entry);
+                if (match.find()) {
+                    final String name = match.group(1);
+                    final int cp1 = Integer.parseInt(match.group(2), codepointRadix);
+                    final int cp2 = match.group(3) != null ? Integer.parseInt(match.group(3), codepointRadix) : empty;
+                    final int index = Integer.parseInt(match.group(4), codepointRadix);
+
+                    e.nameKeys[i] = name;
+                    e.codeVals[i] = cp1;
+                    e.codeKeys[index] = cp1;
+                    e.nameVals[index] = name;
+
+                    if (cp2 != empty) {
+                        multipoints.put(name, new String(new int[]{cp1, cp2}, 0, 2));
+                    }
+                    i++;
+                }
+
+            }
+            reader.close();
+        } catch (IOException err) {
+            throw new IllegalStateException("Error reading resource " + file);
         }
     }
 }

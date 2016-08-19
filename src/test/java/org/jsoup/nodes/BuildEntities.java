@@ -1,9 +1,11 @@
-package org.jsoup.integration;
+package org.jsoup.nodes;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
+import org.jsoup.integration.UrlConnectTest;
+import org.jsoup.nodes.Entities;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -58,7 +60,7 @@ class BuildEntities {
         Collections.sort(baseByCode, byCode);
         Collections.sort(fullByCode, byCode);
 
-        // and update their codepoint index:
+        // and update their codepoint index. Don't
         ArrayList<CharacterRef>[] codelists = new ArrayList[]{baseByCode, fullByCode};
         for (ArrayList<CharacterRef> codelist : codelists) {
             for (int i = 0; i < codelist.size(); i++) {
@@ -93,10 +95,14 @@ class BuildEntities {
         public String toString() {
             return name
                 + "="
-                + codepoints[0]
-                + (codepoints.length > 1 ? "," + codepoints[1] : "")
-                + ";" + codeIndex;
+                + d(codepoints[0])
+                + (codepoints.length > 1 ? "," + d(codepoints[1]) : "")
+                + ";" + d(codeIndex);
         }
+    }
+
+    private static String d(int d) {
+        return Integer.toString(d, Entities.codepointRadix);
     }
 
     private static class ByName implements Comparator<CharacterRef> {
@@ -110,12 +116,18 @@ class BuildEntities {
             int[] c1 = o1.codepoints;
             int[] c2 = o2.codepoints;
             int first = c1[0] - c2[0];
-            if (first != 0 || c1.length == 1 && c2.length == 1)
+            if (first != 0)
                 return first;
+            if (c1.length == 1 && c2.length == 1) { // for the same code, use the shorter name
+                int len = o2.name.length() - o1.name.length();
+                if (len != 0)
+                    return len;
+                return o1.name.compareTo(o2.name);
+            }
             if (c1.length == 2 && c2.length == 2)
                 return c1[1] - c2[1];
             else
-                return c1.length - c2.length;
+                return c2.length - c1.length; // pushes multi down the list so hits on singles first (don't support multi lookup by codepoint yet)
         }
     }
 

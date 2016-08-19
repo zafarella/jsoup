@@ -184,7 +184,7 @@ final class Tokeniser {
             }
             if (!reader.matchConsume(";"))
                 characterReferenceError("missing semicolon"); // missing semi
-            int numChars = Entities.codepointsByName(nameRef, multipointHolder);
+            int numChars = Entities.codepointsForName(nameRef, multipointHolder);
             if (numChars == 1) {
                 codeRef[0] = multipointHolder[0];
                 return codeRef;
