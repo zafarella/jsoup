@@ -395,6 +395,12 @@ public abstract class Node implements Cloneable {
         else
             return el;
     }
+
+    private void nodelistChanged() {
+        if (parentNode != null && parentNode instanceof Element) {
+            ((Element) parentNode).dirtyChildren();
+        }
+    }
     
     /**
      * Replace this node in the DOM with the supplied node.
@@ -407,9 +413,11 @@ public abstract class Node implements Cloneable {
     }
 
     protected void setParentNode(Node parentNode) {
+        Validate.notNull(parentNode);
         if (this.parentNode != null)
             this.parentNode.removeChild(this);
         this.parentNode = parentNode;
+        parentNode.nodelistChanged();
     }
 
     protected void replaceChild(Node out, Node in) {
@@ -422,6 +430,7 @@ public abstract class Node implements Cloneable {
         childNodes.set(index, in);
         in.parentNode = this;
         in.setSiblingIndex(index);
+        nodelistChanged();
         out.parentNode = null;
     }
 
@@ -441,6 +450,7 @@ public abstract class Node implements Cloneable {
             childNodes.add(child);
             child.setSiblingIndex(childNodes.size()-1);
         }
+        nodelistChanged();
     }
 
     protected void addChildren(int index, Node... children) {
@@ -470,6 +480,7 @@ public abstract class Node implements Cloneable {
         for (int i = start; i < childNodes.size(); i++) {
             childNodes.get(i).setSiblingIndex(i);
         }
+        nodelistChanged();
     }
     
     /**

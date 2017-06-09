@@ -34,7 +34,10 @@ import java.util.regex.PatternSyntaxException;
  * @author Jonathan Hedley, jonathan@hedley.net
  */
 public class Element extends Node {
+    private static final List<Element> EMPTY_CHILDREN = Collections.EMPTY_LIST;
+
     private Tag tag;
+    private List<Element> children = EMPTY_CHILDREN;
 
     private static final Pattern classSplit = Pattern.compile("\\s+");
 
@@ -207,7 +210,7 @@ public class Element extends Node {
      * @see #childNode(int)
      */
     public Element child(int index) {
-        return children().get(index);
+        return childrenList().get(index);
     }
 
     /**
@@ -220,13 +223,22 @@ public class Element extends Node {
      * @see #childNodes()
      */
     public Elements children() {
-        // create on the fly rather than maintaining two lists. if gets slow, memoize, and mark dirty on change
-        List<Element> elements = new ArrayList<Element>(childNodes.size());
-        for (Node node : childNodes) {
-            if (node instanceof Element)
-                elements.add((Element) node);
+        return new Elements(childrenList());
+    }
+
+    private List<Element> childrenList() {
+        if (children == EMPTY_CHILDREN) {
+            children = new ArrayList<Element>(childNodes.size());
+            for (Node node : childNodes) {
+                if (node instanceof Element)
+                    children.add((Element) node);
+            }
         }
-        return new Elements(elements);
+        return children;
+    }
+
+    protected void dirtyChildren() {
+        children = EMPTY_CHILDREN;
     }
 
     /**
@@ -553,7 +565,7 @@ public class Element extends Node {
         if (parentNode == null)
             return new Elements(0);
 
-        List<Element> elements = parent().children();
+        List<Element> elements = parent().childrenList();
         Elements siblings = new Elements(elements.size() - 1);
         for (Element el: elements)
             if (el != this)
@@ -572,7 +584,7 @@ public class Element extends Node {
      */
     public Element nextElementSibling() {
         if (parentNode == null) return null;
-        List<Element> siblings = parent().children();
+        List<Element> siblings = parent().childrenList();
         Integer index = indexInList(this, siblings);
         Validate.notNull(index);
         if (siblings.size() > index+1)
@@ -588,7 +600,7 @@ public class Element extends Node {
      */
     public Element previousElementSibling() {
         if (parentNode == null) return null;
-        List<Element> siblings = parent().children();
+        List<Element> siblings = parent().childrenList();
         Integer index = indexInList(this, siblings);
         Validate.notNull(index);
         if (index > 0)
@@ -603,7 +615,7 @@ public class Element extends Node {
      */
     public Element firstElementSibling() {
         // todo: should firstSibling() exclude this?
-        List<Element> siblings = parent().children();
+        List<Element> siblings = parent().childrenList();
         return siblings.size() > 1 ? siblings.get(0) : null;
     }
     
@@ -614,7 +626,7 @@ public class Element extends Node {
      */
     public Integer elementSiblingIndex() {
        if (parent() == null) return 0;
-       return indexInList(this, parent().children()); 
+       return indexInList(this, parent().childrenList());
     }
 
     /**
@@ -622,7 +634,7 @@ public class Element extends Node {
      * @return the last sibling that is an element (aka the parent's last element child) 
      */
     public Element lastElementSibling() {
-        List<Element> siblings = parent().children();
+        List<Element> siblings = parent().childrenList();
         return siblings.size() > 1 ? siblings.get(siblings.size() - 1) : null;
     }
     
